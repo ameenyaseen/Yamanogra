@@ -32,21 +32,16 @@ bot = commands.Bot(command_prefix='\\', description=description, intents=intents
 # Dictionary Containing GuildInf Instances for each guild
 Guild_Q: dict[int, 'GuildInf'] = {}
 
-
-# def play_song(GuildInf: GuildInf):
-#     if len(GuildInf.que) == 0:
-#         return
-#     GuildInf.CurrentSong = GuildInf.que.pop()
-#     song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(GuildInf.CurrentSong, download=False)
-#     url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
-#     GuildInf.voice.play(discord.FFmpegPCMAudio(url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}), after=help_play())
-
-
-
 @dataclass
 class SongInfo:
     '''
     A class containing info on a song / argument passed to play:
+    :var srch_trm - Search term to be passed to yt-dL
+    :var srch_type - Tracks if search is a url or ytsearch
+    :var title - Song title
+    :var uploader - Uploder's Channel
+    :var url - url to video
+    :var duration - Length of song in seconds
     '''
     srch_trm: str = field(default_factory=str)
     srch_type: str = field(default_factory=str)
@@ -64,12 +59,13 @@ class GuildInf:
     '''
     A class used to contain instance data from each guild the bot is a member of.
     :var voice - A VoiceClient object from discord.py. Used to establish connections to voice channels
-    :var CurrentSong - Contains a songinfo instance. (Currently Song info is a yt-url)
-    :var que - List of songinfo instances.
+    :var CurrentSong - Contains a SongInfor instance.
+    :var que - List of SongInfo instances.
     '''
     voice: VoiceClient = None
     CurrentSong: SongInfo = None
     que: list[SongInfo] = field(default_factory=list)
+    name: str = field(default_factory=str)
 
 
 @bot.event
@@ -79,8 +75,10 @@ async def on_ready():
     :return: None
     '''
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+
     for guild in bot.guilds:
         Guild_Q[guild.id] = GuildInf()
+        Guild_Q[guild.id].name = guild.name
     print('------')
     print(Guild_Q)
 
@@ -140,7 +138,7 @@ async def p(ctx: Context, *term: str):
             guild_data.voice = None
             return
 
-        guild_data.CurrentSong = guild_data.que.pop()
+        guild_data.CurrentSong = guild_data.que.pop(0)
 
         song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(guild_data.CurrentSong.url, download=False)
         play_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
@@ -175,18 +173,28 @@ async def q(ctx: Context):
 
 
 @bot.command()
-async def s(ctx: Context, skip: int = 1):
+async def s(ctx: Context, skip: int = None):
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
     if len(guild_data.que) == 0:
         await guild_data.voice.disconnect()
         guild_data.voice = None
 
-    if skip > len(guild_data.que):
+    if skip is None:
+        guild_data.voice.stop()
+        pass
+
+    elif skip > len(guild_data.que):
         await ctx.send("Skipping more songs than those in que!")
 
-    guild_data.que = guild_data.que[skip-1:]
-    guild_data.voice.stop()
+    else:
+        for i in range(skip-1):
+            guild_data.que.pop(0)
+            if len(guild_data.que) == 0:
+                await guild_data.voice.disconnect()
+                guild_data.voice = None
+
+        guild_data.voice.stop()
 
 with open('init.json', 'r') as f:
     data_dict = json.load(f)
