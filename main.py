@@ -3,7 +3,6 @@ from typing import Optional
 import discord
 from discord import VoiceClient
 from discord.ext import commands
-import random
 import yt_dlp as yd
 from discord.ext.commands import Context
 import json
@@ -43,17 +42,6 @@ Guild_Q: dict[int, 'GuildInf'] = {}
 #     GuildInf.voice.play(discord.FFmpegPCMAudio(url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}), after=help_play())
 
 
-@dataclass
-class GuildInf:
-    '''
-    A class used to contain instance data from each guild the bot is a member of.
-    :var voice - A VoiceClient object from discord.py. Used to establish connections to voice channels
-    :var CurrentSong - Contains a songinfo instance. (Currently Song info is a yt-url)
-    :var que - List of songinfo instances.
-    '''
-    voice: VoiceClient = None
-    CurrentSong: str = field(default_factory=str)
-    que: list[str] = field(default_factory=list)
 
 @dataclass
 class SongInfo:
@@ -63,9 +51,26 @@ class SongInfo:
     srch_trm: str = field(default_factory=str)
     srch_type: str = field(default_factory=str)
     title: str = field(default_factory=str)
-    # uploader: str = field(default_factory=str)
+    uploader: str = field(default_factory=str)
     url: str = field(default_factory=str)
     duration: float = field(default_factory=float)
+
+    def __str__(self):
+        return f"Title: {self.title}\tUploaded by: {self.uploader}\n"
+
+
+@dataclass
+class GuildInf:
+    '''
+    A class used to contain instance data from each guild the bot is a member of.
+    :var voice - A VoiceClient object from discord.py. Used to establish connections to voice channels
+    :var CurrentSong - Contains a songinfo instance. (Currently Song info is a yt-url)
+    :var que - List of songinfo instances.
+    '''
+    voice: VoiceClient = None
+    CurrentSong: SongInfo = None
+    que: list[SongInfo] = field(default_factory=list)
+
 
 @bot.event
 async def on_ready():
@@ -100,9 +105,12 @@ async def p(ctx: Context, *term: str):
         temp_song = None
 
         if len(term) == 0:
-            ctx.send("Invalid entry, please enter a valid search term. (Youtube URL or Search Term)")
+            SngInf.srch_type = 'url'
+            SngInf.srch_trm = "https://youtu.be/6GEI3PpXEAo"
+            temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)
+            pass
 
-        if len(term) == 1 :
+        elif len(term) == 1 :
             if 'youtu.be ' in term[0]:
                 SngInf.srch_type = 'url'
                 SngInf.srch_trm = ''.join(term)
@@ -110,7 +118,7 @@ async def p(ctx: Context, *term: str):
 
             else:
                 SngInf.srch_type = 'srch'
-                SngInf.srch_trm = ''.join(term)
+                SngInf.srch_trm = 'ytsearch:' + ''.join(term)
                 temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)["entries"][0]
 
         else:
@@ -120,21 +128,23 @@ async def p(ctx: Context, *term: str):
 
         SngInf.title = temp_song["title"]
         SngInf.url = temp_song["original_url"]
-        # SngInf.uploader = temp_song["uploader"]
+        SngInf.uploader = temp_song["uploader"]
         SngInf.duration = temp_song["duration"]
 
         return SngInf
 
     def play_song(perhaps = None):
-        if len(guild_data.que) == 0:
-            return
-        guild_data.CurrentSong: SongInfo = guild_data.que.pop()
-        song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(guild_data.CurrentSong.srch_trm, download=False)
-        if guild_data.CurrentSong.srch_type == 'srch':
-            song = song["entries"][0]
 
-        url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
-        guild_data.voice.play(discord.FFmpegPCMAudio(url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}), after = play_song)
+        if len(guild_data.que) == 0:
+            voice_data.disconnect()
+            guild_data.voice = None
+            return
+
+        guild_data.CurrentSong = guild_data.que.pop()
+
+        song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(guild_data.CurrentSong.url, download=False)
+        play_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
+        guild_data.voice.play(discord.FFmpegPCMAudio(play_url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}), after = play_song)
 
     if channel.guild is guild:
         # This connects the client to a particular guild. Also checks if already connected.
@@ -157,21 +167,39 @@ async def q(ctx: Context):
     '''
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
-    await ctx.send(f"The url's are {guild_data.que}")
+    outstr = "------------ Now Playing ------------\n" + "0) " + guild_data.CurrentSong.__str__() + "------------ Now Playing ------------\n"
+    for i, song in enumerate(guild_data.que):
+        outstr = outstr + f"{i+1}) " + song.__str__()
+
+    await ctx.send(outstr)
 
 
 @bot.command()
-async def s(ctx: Context):
+async def s(ctx: Context, skip: int = 1):
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
     if len(guild_data.que) == 0:
         await guild_data.voice.disconnect()
         guild_data.voice = None
 
+    if skip > len(guild_data.que):
+        await ctx.send("Skipping more songs than those in que!")
+
+    guild_data.que = guild_data.que[skip-1:]
     guild_data.voice.stop()
 
 with open('init.json', 'r') as f:
     data_dict = json.load(f)
+
+@bot.command()
+async def url(ctx: Context):
+    guild_id = ctx.author.guild.id
+    guild_data = Guild_Q[guild_id]
+
+    guild_data.CurrentSong:SongInfo
+
+    outstr: str = guild_data.CurrentSong.url
+    await ctx.send(outstr)
 
 bot.run(data_dict['token'])
 
