@@ -55,6 +55,17 @@ class GuildInf:
     CurrentSong: str = field(default_factory=str)
     que: list[str] = field(default_factory=list)
 
+@dataclass
+class SongInfo:
+    '''
+    A class containing info on a song / argument passed to play:
+    '''
+    srch_trm: str = field(default_factory=str)
+    srch_type: str = field(default_factory=str)
+    title: str = field(default_factory=str)
+    # uploader: str = field(default_factory=str)
+    url: str = field(default_factory=str)
+    duration: float = field(default_factory=float)
 
 @bot.event
 async def on_ready():
@@ -70,7 +81,7 @@ async def on_ready():
 
 
 @bot.command()
-async def p(ctx: Context, term: str):
+async def p(ctx: Context, *term: str):
     """
     Takes a str term and plays a video from yt-dlp
     :param ctx:
@@ -84,14 +95,44 @@ async def p(ctx: Context, term: str):
 
     guild_data = Guild_Q[guild_id]
 
+    def initialize_info(term):
+        SngInf: SongInfo = SongInfo()
+        temp_song = None
+
+        if len(term) == 0:
+            ctx.send("Invalid entry, please enter a valid search term. (Youtube URL or Search Term)")
+
+        if len(term) == 1 :
+            if 'youtu.be ' in term[0]:
+                SngInf.srch_type = 'url'
+                SngInf.srch_trm = ''.join(term)
+                temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)
+
+            else:
+                SngInf.srch_type = 'srch'
+                SngInf.srch_trm = ''.join(term)
+                temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)["entries"][0]
+
+        else:
+            SngInf.srch_trm = 'ytsearch:' + ' '.join(term)
+            SngInf.srch_type = 'srch'
+            temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm,download=False)["entries"][0]
+
+        SngInf.title = temp_song["title"]
+        SngInf.url = temp_song["original_url"]
+        # SngInf.uploader = temp_song["uploader"]
+        SngInf.duration = temp_song["duration"]
+
+        return SngInf
 
     def play_song(perhaps = None):
         if len(guild_data.que) == 0:
             return
-        guild_data.CurrentSong = guild_data.que.pop()
-        song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(guild_data.CurrentSong, download=False)
-        if "ytsearch" in guild_data.CurrentSong:
-            song = song['entries'][0]
+        guild_data.CurrentSong: SongInfo = guild_data.que.pop()
+        song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(guild_data.CurrentSong.srch_trm, download=False)
+        if guild_data.CurrentSong.srch_type == 'srch':
+            song = song["entries"][0]
+
         url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
         guild_data.voice.play(discord.FFmpegPCMAudio(url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}), after = play_song)
 
@@ -101,8 +142,8 @@ async def p(ctx: Context, term: str):
             voice_data: VoiceClient = await channel.connect()
             guild_data.voice = voice_data
 
-
-        guild_data.que.append(term)
+        #Song is added to que here.
+        guild_data.que.append(initialize_info(term))
         if not guild_data.voice.is_playing():
             play_song()
 
@@ -133,3 +174,5 @@ with open('init.json', 'r') as f:
     data_dict = json.load(f)
 
 bot.run(data_dict['token'])
+
+
