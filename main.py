@@ -3,6 +3,7 @@ from typing import Optional
 import discord
 from discord import VoiceClient
 from discord.ext import commands
+import random
 import yt_dlp as yd
 from discord.ext.commands import Context
 import json
@@ -64,7 +65,7 @@ class GuildInf:
     '''
     A class used to contain instance data from each guild the bot is a member of.
     :var voice - A VoiceClient object from discord.py. Used to establish connections to voice channels
-    :var CurrentSong - Contains a SongInfor instance.
+    :var CurrentSong - Contains a SongInfo instance.
     :var que - List of SongInfo instances.
     '''
     voice: VoiceClient = None
