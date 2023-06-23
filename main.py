@@ -1,13 +1,29 @@
+import json
+from datetime import datetime, timedelta
+
 from dataclasses import dataclass, field
-from typing import Optional
+
 import discord
 from discord import VoiceClient
 from discord.ext import commands
-import random
-import yt_dlp as yd
 from discord.ext.commands import Context
-import json
+
+import yt_dlp as yd
+
+
+
 import asyncio
+
+
+def reduce_secs(seconds: int):
+    if seconds < 60:
+        return f"00:{seconds}"
+
+    else:
+        minute = seconds // 60
+        seconds = seconds - minute * 60
+
+        return f"{minute}:{seconds}"
 
 
 def get_function_default_args(func):
@@ -34,6 +50,7 @@ bot = commands.Bot(command_prefix='\\', description=description, intents=intents
 # Dictionary Containing GuildInf Instances for each guild
 Guild_Q: dict[int, 'GuildInf'] = {}
 
+
 @dataclass
 class SongInfo:
     '''
@@ -47,6 +64,8 @@ class SongInfo:
     :var plying_url - URL used to launch a PCM audio stream
     :var seek_to - Time in seconds to seek to
     '''
+    seek_to: int = 0
+    start_time: datetime = None
     srch_trm: str = field(default_factory=str)
     srch_type: str = field(default_factory=str)
     title: str = field(default_factory=str)
@@ -54,10 +73,9 @@ class SongInfo:
     url: str = field(default_factory=str)
     duration: float = field(default_factory=float)
     plying_url: str = field(default_factory=str)
-    seek_to: int = 0
 
     def __str__(self):
-        return f"Title: {self.title}\tUploaded by: {self.uploader}\n"
+        return f"Title: {self.title}\tUploaded by: {self.uploader}\t"
 
 
 @dataclass
@@ -97,6 +115,8 @@ async def p(ctx: Context, *term: str):
     :param term: Search String
     :return: None
     """
+    if None is ctx.author.voice:
+        return
 
     channel = ctx.author.voice.channel
     guild = ctx.author.guild
@@ -111,24 +131,30 @@ async def p(ctx: Context, *term: str):
         if len(term) == 0:
             SngInf.srch_type = 'url'
             SngInf.srch_trm = "https://youtu.be/6GEI3PpXEAo"
-            temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)
+            temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(
+                SngInf.srch_trm, download=False)
             pass
 
-        elif len(term) == 1 :
+        elif len(term) == 1:
             if 'youtu.be ' in term[0]:
                 SngInf.srch_type = 'url'
                 SngInf.srch_trm = ''.join(term)
-                temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)
+                temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(
+                    SngInf.srch_trm, download=False)
 
             else:
                 SngInf.srch_type = 'srch'
                 SngInf.srch_trm = 'ytsearch:' + ''.join(term)
-                temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm, download=False)["entries"][0]
+                temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(
+                    SngInf.srch_trm, download=False)["entries"][0]
 
         else:
             SngInf.srch_trm = 'ytsearch:' + ' '.join(term)
             SngInf.srch_type = 'srch'
-            temp_song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm,download=False)["entries"][0]
+            temp_song = \
+            yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(SngInf.srch_trm,
+                                                                                                       download=False)[
+                "entries"][0]
 
         SngInf.title = temp_song["title"]
         SngInf.url = temp_song["original_url"]
@@ -137,7 +163,7 @@ async def p(ctx: Context, *term: str):
 
         return SngInf
 
-    def play_song(perhaps = None):
+    def play_song(perhaps=None):
 
         if len(guild_data.que) <= 0:
             bot.loop.create_task(guild_data.voice.disconnect())
@@ -145,9 +171,13 @@ async def p(ctx: Context, *term: str):
 
         guild_data.CurrentSong = guild_data.que.pop(0)
 
-        song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(guild_data.CurrentSong.url, download=False)
+        song = yd.YoutubeDL({'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}).extract_info(
+            guild_data.CurrentSong.url, download=False)
         play_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
-        guild_data.voice.play(discord.FFmpegPCMAudio(play_url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}), after = play_song)
+        guild_data.voice.play(discord.FFmpegPCMAudio(play_url, **{
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}),
+                              after=play_song)
+        guild_data.CurrentSong.start_time = datetime.now()
 
     if channel.guild is guild:
         # This connects the client to a particular guild. Also checks if already connected.
@@ -155,7 +185,7 @@ async def p(ctx: Context, *term: str):
             voice_data: VoiceClient = await channel.connect()
             guild_data.voice = voice_data
 
-        #Song is added to que here.
+        # Song is added to que here.
         guild_data.que.append(initialize_info(term))
         if not guild_data.voice.is_playing():
             play_song()
@@ -170,9 +200,17 @@ async def q(ctx: Context):
     '''
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
-    outstr = "------------ Now Playing ------------\n" + "0) " + guild_data.CurrentSong.__str__() + "------------ Now Playing ------------\n"
+    if guild_data.CurrentSong is None:
+        return
+
+    time_elapsed = datetime.now() - guild_data.CurrentSong.start_time
+
+    sep = "------------------------"
+    np = " Now Playing "
+
+    outstr = sep+np+sep + "\n" + "0) " + guild_data.CurrentSong.__str__() + f"Time elapsed: = {reduce_secs(round(time_elapsed.total_seconds()))}/{reduce_secs(round(guild_data.CurrentSong.duration))}" + '\n' + sep+np+sep + "\n"
     for i, song in enumerate(guild_data.que):
-        outstr = outstr + f"{i+1}) " + song.__str__()
+        outstr = outstr + f"{i + 1}) " + song.__str__() + '\n'
 
     outstr = '```' + outstr + '```'
 
@@ -181,8 +219,13 @@ async def q(ctx: Context):
 
 @bot.command()
 async def s(ctx: Context, skip: int = None):
+
+    if None is ctx.author.voice:
+        return
+
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
+    # if ctx.guild is
     if len(guild_data.que) == 0:
         await guild_data.voice.disconnect()
         guild_data.voice = None
@@ -195,7 +238,7 @@ async def s(ctx: Context, skip: int = None):
         await ctx.send("Skipping more songs than those in que!")
 
     else:
-        for i in range(skip-1):
+        for i in range(skip - 1):
             guild_data.que.pop(0)
             if len(guild_data.que) == 0:
                 await guild_data.voice.disconnect()
@@ -204,17 +247,24 @@ async def s(ctx: Context, skip: int = None):
         guild_data.voice.stop()
 
 
+# @bot.command()
+# async def seek(ctx: Context, *inp):
+#
+#     if len(inp) > 1:
+#         return
+
+
 with open('init.json', 'r') as f:
     data_dict = json.load(f)
+
 
 @bot.command()
 async def url(ctx: Context):
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
 
-    guild_data.CurrentSong:SongInfo
-
     outstr: str = guild_data.CurrentSong.url
     await ctx.send(outstr)
+
 
 bot.run(data_dict['token'])
