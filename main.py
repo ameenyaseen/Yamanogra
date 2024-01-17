@@ -64,7 +64,7 @@ class SongInfo:
     plying_url: str = field(default_factory=str)
 
     def __str__(self):
-        return f"Title: {self.title}\tUploaded by: {self.uploader}\t"
+        return f"Title: {self.title}\tUploaded by: {self.uploader}"
 
 
 @dataclass
@@ -73,10 +73,13 @@ class GuildInf:
     A class used to contain instance data from each guild the bot is a member of.
     :var voice - A VoiceClient object from discord.py. Used to establish connections to voice channels
     :var CurrentSong - Contains a SongInfo instance.
+    :var looping - boolean value on whether to loop the queue
     :var que - List of SongInfo instances.
     """
+
     voice: VoiceClient = None
     CurrentSong: SongInfo = None
+    looping: bool = field(default_factory=bool)
     que: list[SongInfo] = field(default_factory=list)
     name: str = field(default_factory=str)
 
@@ -184,23 +187,24 @@ async def p(ctx: Context, *term: str):
         :return: None
         """
         if len(guild_data.que) <= 0:
-            if guild_data.voice.is_playing():
+            if guild_data.voice.is_playing():  # Checks to see if the bot is already playing a song
                 pass
 
             guild_data.que = []
             bot.loop.create_task(guild_data.voice.disconnect())
             guild_data.voice = None
-            guild_data.CurrentSong = "Press \\p when in a Voice channel to start listening!"
+            guild_data.CurrentSong = None
 
         else:
-            guild_data.CurrentSong = guild_data.que[0]
+            # The first song in the Que is removed and set as the currently playing song.
+            guild_data.CurrentSong = guild_data.que.pop(0)
 
             song = yd.YoutubeDL(ytDL_params).extract_info(guild_data.CurrentSong.url, download=False)
             play_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
             audio_src = discord.FFmpegPCMAudio(play_url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'})
             guild_data.voice.play(audio_src, after=play_song)
             guild_data.CurrentSong.start_time = datetime.now()
-            guild_data.que.pop(0)
+
 
     if channel.guild is guild:
         # This connects the client to a particular guild. Also checks if already connected.
@@ -208,7 +212,7 @@ async def p(ctx: Context, *term: str):
             voice_data: VoiceClient = await channel.connect()
             guild_data.voice = voice_data
 
-        # Song is added to que here.
+        # Song is added to queue here.
         guild_data.que.append(initialize_info(term))
         if not guild_data.voice.is_playing():
             play_song()
@@ -217,14 +221,14 @@ async def p(ctx: Context, *term: str):
 @bot.command()
 async def q(ctx: Context):
     '''
-    Displays a que based on the guild id from context of command call
+    Displays a queue based on the guild id from context of command call
     :param ctx: Context of command call.
     :return:
     '''
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
     if guild_data.CurrentSong is None:
-        await ctx.send('```' + "Nothing in Que. Join a VC and use \\p to start listening" + '```')
+        await ctx.send('```' + "Nothing in Queue. Join a VC and use \\p to start listening" + '```')
         return
 
     time_elapsed = datetime.now() - guild_data.CurrentSong.start_time
@@ -233,7 +237,7 @@ async def q(ctx: Context):
     np = " Now Playing "
 
     outstr = sep+np+sep + "\n" + "0) " + guild_data.CurrentSong.__str__() + f"Time elapsed: = {reduce_secs(round(time_elapsed.total_seconds()))}/{reduce_secs(round(guild_data.CurrentSong.duration))}" + '\n' + sep+np+sep + "\n"
-    outstr = outstr + "\n" + sep + "Playing in Two More Weeks" + sep + "\n"
+    outstr = outstr + "\n" + sep + " Playing in Two More Weeks " + sep + "\n"
     for i, song in enumerate(guild_data.que):
         outstr = outstr + f"{i + 1}) " + song.__str__() + '\n'
 
@@ -265,7 +269,7 @@ async def s(ctx: Context, skip: int = None):
         pass
 
     elif skip > len(guild_data.que):
-        await ctx.send("Skipping more songs than those in que!")
+        await ctx.send("Skipping more songs than those in queue!")
 
     else:
         for i in range(skip - 1):
@@ -276,25 +280,41 @@ async def s(ctx: Context, skip: int = None):
 
         guild_data.voice.stop()
 
-# @bot.command()
-# async def seek(ctx: Context, *inp):
-#
-#     if len(inp) > 1:
-#         return
-
-with open('init.json', 'r') as f:
-    data_dict = json.load(f)
-
 
 @bot.command()
 async def url(ctx: Context):
     """
     Displays url for currently playing track
     :param ctx: Message context
-    :return:
+    :return: Message out to Discord Channel
     """
     guild_id = ctx.author.guild.id
     guild_data = Guild_Q[guild_id]
 
     outstr: str = guild_data.CurrentSong.url
     await ctx.send(outstr)
+
+
+@bot.command()
+async def r(ctx: Context, term: str):
+    """
+    Responsible for removing specific songs from the Guild Que
+    :param ctx: Message context
+    :param term: A str of numbers seperated by spaces
+    :return: Message with removed song information
+    """
+    guild_id = ctx.author.guild.id
+    guild_data:GuildInf = Guild_Q[guild_id]
+    if len(term) == 0:
+        pass
+
+    else:
+        if int(term)-1 <= len(guild_data.que):
+            removed_song = guild_data.que.pop(int(term)-1)
+            outstr = f"```Removed {removed_song.__str__()} from the queue```"
+            await ctx.send(outstr)
+
+with open('init.json', 'r') as f:
+    data_dict = json.load(f)
+
+bot.run(data_dict['token'])
