@@ -1,7 +1,10 @@
 import json
 import random
+from copy import deepcopy
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+from typing import Optional
+
 import discord
 from discord import VoiceClient
 from discord.ext import commands
@@ -62,6 +65,7 @@ class SongInfo:
     url: str = field(default_factory=str)
     duration: float = field(default_factory=float)
     plying_url: str = field(default_factory=str)
+    options: dict[str: str] = field(default_factory=lambda : {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'})
 
     def __str__(self):
         return f"Title: {self.title}\tUploaded by: {self.uploader}"
@@ -98,6 +102,21 @@ async def on_ready():
     print('------')
     print(Guild_Q)
 
+@bot.command()
+async def h(ctx: Context):
+    """
+    Sends a message with instructions on using the bot
+    :param ctx:
+    :return: Message Out
+    """
+    outstr = "Yamanogra V0.4 Beta - Developed by brotheryam" \
+             "* - Optional argument" \
+             "" \
+             "\p [search term or url]* - Plays a song" \
+             "\q - Displays queue" \
+             "\s [integer]* - Skips to song based on queue indexing" \
+             "\\url - Displays Youtube link to currently playing song" \
+             "\\r [integer] - Removes song at given index from the queue" \
 
 @bot.command()
 async def p(ctx: Context, *term: str):
@@ -200,8 +219,8 @@ async def p(ctx: Context, *term: str):
             guild_data.CurrentSong = guild_data.que.pop(0)
 
             song = yd.YoutubeDL(ytDL_params).extract_info(guild_data.CurrentSong.url, download=False)
-            play_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
-            audio_src = discord.FFmpegPCMAudio(play_url, **{'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'})
+            guild_data.CurrentSong.plying_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
+            audio_src = discord.FFmpegPCMAudio(guild_data.CurrentSong.plying_url, **guild_data.CurrentSong.options)
             guild_data.voice.play(audio_src, after=play_song)
             guild_data.CurrentSong.start_time = datetime.now()
 
@@ -236,7 +255,7 @@ async def q(ctx: Context):
     sep = "------------------------"
     np = " Now Playing "
 
-    outstr = sep+np+sep + "\n" + "0) " + guild_data.CurrentSong.__str__() + f"Time elapsed: = {reduce_secs(round(time_elapsed.total_seconds()))}/{reduce_secs(round(guild_data.CurrentSong.duration))}" + '\n' + sep+np+sep + "\n"
+    outstr = sep+np+sep + "\n" + "0) " + guild_data.CurrentSong.__str__() + f"Time elapsed: = {reduce_secs(round(time_elapsed.total_seconds() + guild_data.CurrentSong.seek_to))}/{reduce_secs(round(guild_data.CurrentSong.duration))}" + '\n' + sep+np+sep + "\n"
     outstr = outstr + "\n" + sep + " Playing in Two More Weeks " + sep + "\n"
     for i, song in enumerate(guild_data.que):
         outstr = outstr + f"{i + 1}) " + song.__str__() + '\n'
@@ -313,6 +332,38 @@ async def r(ctx: Context, term: str):
             removed_song = guild_data.que.pop(int(term)-1)
             outstr = f"```Removed {removed_song.__str__()} from the queue```"
             await ctx.send(outstr)
+
+
+@bot.command()
+async def seek(ctx: Context, term:str):
+    """
+
+    :param ctx:
+    :param term: string literal of style MM:SS or HH:MM:SS
+    :return:
+    """
+    guild_id = ctx.author.guild.id
+    guild_data: GuildInf = Guild_Q[guild_id]
+    song = deepcopy(guild_data.CurrentSong)
+    options = None
+    L = [int(i) for i in term.split(':')]
+    if term.count(':') == 1:
+        song.seek_to = L[0]*60 + L[1]
+        if song.seek_to > song.duration:
+            pass
+        guild_data.que.insert(0, song)
+        song.options = {'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {00:02d}:{L[0]:02d}:{L[1]:02d}', 'options': '-vn'}
+        await s(ctx)
+
+    elif term.count(':') == 2:
+        song.seek_to = L[0]*60*60 + L[1] * 60 + L[2]
+        song.options = {'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {L[0]:02d}:{L[1]:02d}:{L[2]:02d}', 'options': '-vn'}
+        if song.seek_to > song.duration:
+            pass
+        guild_data.que.insert(0, song)
+        await s(ctx)
+
+
 
 with open('init.json', 'r') as f:
     data_dict = json.load(f)
