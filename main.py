@@ -3,7 +3,9 @@ import random
 from copy import deepcopy
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
-from typing import Optional
+from os.path import isfile
+from typing import Optional, Iterable
+import sqlite3
 
 import discord
 from discord import VoiceClient
@@ -26,21 +28,6 @@ def reduce_secs(seconds: int):
         seconds = seconds - minute * 60
 
         return f"{minute:02}:{seconds:02}"
-
-# Initialization of some things
-description = '''A simple music bot created for fun. Part of the MaMa network.'''
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-
-# Setting our prefix for bot commands
-bot = commands.Bot(command_prefix='\\', description=description, intents=intents)
-
-# Dictionary Containing GuildInf Instances for each guild
-Guild_Q: dict[int, 'GuildInf'] = {}
-
-# ytDL Paramaters setup here
-ytDL_params = {'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}
 
 
 @dataclass
@@ -65,7 +52,10 @@ class SongInfo:
     url: str = field(default_factory=str)
     duration: float = field(default_factory=float)
     plying_url: str = field(default_factory=str)
-    options: dict[str: str] = field(default_factory=lambda : {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'})
+    seeked: bool = False
+    options: dict[str: str] = field(
+        default_factory=lambda: {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+                                 'options': '-vn'})
 
     def __str__(self):
         return f"Title: {self.title}\tUploaded by: {self.uploader}"
@@ -88,6 +78,130 @@ class GuildInf:
     name: str = field(default_factory=str)
 
 
+class DB:
+    file_name = "track_cache.db"
+
+    def __enter__(self):
+        self.con = sqlite3.connect("track_cache.db")
+        self.cur = self.con.cursor()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.con.commit()
+        self.con.close()
+        self.con = None
+        self.cur = None
+
+    def __init__(self):
+        self.con: Optional[sqlite3.Connection] = None
+        self.cur: Optional[sqlite3.Cursor] = None
+        if not isfile(DB.file_name):
+            self.create_database()
+
+    def create_database(self):
+        """
+        Launches database queries to build all relevant tables
+        """
+        with self as d:
+            d.cur = self.con.cursor()
+            d.cur.executescript("""
+                CREATE TABLE songs (
+                    id INTEGER NOT NULL UNIQUE, 
+                    title,
+                    uploader,
+                    url,
+                    player INTEGER NOT NULL,
+                    guild INTEGER NOT NULL,
+                    PRIMARY KEY(id AUTOINCREMENT),
+                    FOREIGN KEY(player) REFERENCES "users"(user_id),
+                    FOREIGN KEY(guild) REFERENCES "guilds"(guild_id)
+                );
+                
+                CREATE TABLE users (
+                    user_id INTEGER NOT NULL UNIQUE,
+                    username TEXT NOT NULL,
+                    PRIMARY KEY (user_id)
+                );
+                
+                CREATE TABLE "guilds" (
+                    guild_id INTEGER NOT NULL UNIQUE,
+                    guild_name,
+                    PRIMARY KEY (guild_id)
+                );
+                
+                CREATE TABLE memberships (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    id INTEGER NOT NULL UNIQUE,
+                    PRIMARY KEY (id AUTOINCREMENT),
+                    FOREIGN KEY (guild_id) REFERENCES guilds (guild_id),
+                    FOREIGN KEY (user_id) REFERENCES users (user_id),
+                    UNIQUE (guild_id, user_id)
+                );
+            """)
+
+    def register_users(self, users: Iterable[tuple[int, str]]):
+        assert self.con is not None and self.cur is not None
+
+        users = [(str(x[0]), x[1]) for x in users]
+        self.cur.executemany(
+            """
+            INSERT OR IGNORE INTO users (user_id, username) values (?,?)
+            """
+            , users
+        )
+
+    def register_server(self, server_id: int, server_name: str):
+        # Verify connection to database
+        assert self.con is not None and self.cur is not None
+
+        self.cur.execute(
+            """
+            INSERT OR IGNORE INTO guilds (guild_id, guild_name) VALUES (?,?)
+            """
+            , (server_id, server_name)
+        )
+
+    def register_memberships(self, server_id: int, users: Iterable[int]):
+        assert self.con is not None and self.cur is not None
+
+        self.cur.executemany(
+            """
+            INSERT OR IGNORE INTO memberships (guild_id, user_id) VALUES (?,?) 
+            """
+            , [(server_id, u) for u in users]
+        )
+
+    def register_song(self, song: SongInfo, guild_id: int, user_id: int):
+        assert self.con is not None and self.cur is not None
+
+        self.cur.execute(
+            """
+            INSERT INTO songs (title, uploader, url, player, guild) VALUES  (?, ?, ?, ?, ?) 
+            """
+            , (song.title, song.uploader, song.url, str(user_id), str(guild_id))
+        )
+
+
+# Initialization of some things
+description = '''A simple music bot created for fun. Part of the MaMa network.'''
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+
+# Setting our prefix for bot commands
+bot = commands.Bot(command_prefix='\\', description=description, intents=intents)
+
+# Dictionary Containing GuildInf Instances for each guild
+Guild_Q: dict[int, 'GuildInf'] = {}
+
+# ytDL Paramaters setup here
+ytDL_params = {'format': 'bestaudio/best', 'quiet': True, 'noplaylist': True}
+
+# Defining our Database
+database = DB()
+
+
 @bot.event
 async def on_ready():
     """
@@ -95,12 +209,19 @@ async def on_ready():
     :return: None
     """
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    with database:
+        for guild in bot.guilds:
 
-    for guild in bot.guilds:
-        Guild_Q[guild.id] = GuildInf()
-        Guild_Q[guild.id].name = guild.name
+            database.register_server(guild.id, guild.name)
+            database.register_users((x.id, x.name) for x in guild.members)
+            database.register_memberships(guild.id, [user.id for user in guild.members])
+
+            Guild_Q[guild.id] = GuildInf()
+            Guild_Q[guild.id].name = guild.name
+
     print('------')
     print(Guild_Q)
+
 
 @bot.command()
 async def h(ctx: Context):
@@ -109,14 +230,9 @@ async def h(ctx: Context):
     :param ctx:
     :return: Message Out
     """
-    outstr = "Yamanogra V0.4 Beta - Developed by brotheryam" \
-             "* - Optional argument" \
-             "" \
-             "\p [search term or url]* - Plays a song" \
-             "\q - Displays queue" \
-             "\s [integer]* - Skips to song based on queue indexing" \
-             "\\url - Displays Youtube link to currently playing song" \
-             "\\r [integer] - Removes song at given index from the queue" \
+    outstr = "Yamanogra V0.6.1 Beta - Developed by brotheryam\n Part of the MaMa network! Check out Mamamnogra ()" + "* - Optional argument\n\n" + "\p [search term or url]* - Plays a song\n" + "\q - Displays queue\n" + "\s [integer]* - Skips to song based on queue indexing\n" + "\\url - Displays Youtube link to currently playing song\n" + "\\r [integer] - Removes song at given index from the queue\n" + "\seek [int]:[int] or [int]:[int]:[int] - Seeks to specified point in song"
+    await ctx.send('```' + outstr + '```')
+
 
 @bot.command()
 async def p(ctx: Context, *term: str):
@@ -129,13 +245,13 @@ async def p(ctx: Context, *term: str):
 
     # A check for whether the command is sent by a user connected to a voice channel in the guild.
     if None is ctx.author.voice:
-
         return
 
     # Setting parameters for voice channels, server etc.
     channel = ctx.author.voice.channel
     guild = ctx.author.guild
     guild_id = ctx.author.guild.id
+    player = ctx.author.id
 
     guild_data = Guild_Q[guild_id]
 
@@ -167,7 +283,6 @@ async def p(ctx: Context, *term: str):
                         "https://youtu.be/1ih-Lsaf5oM",  # Speak Like a Child
                         "https://youtu.be/kFDPPl9yZvQ"
                         ]
-
 
             SngInf.srch_type = 'url'
             SngInf.srch_trm = random.choice(SongList)
@@ -218,12 +333,16 @@ async def p(ctx: Context, *term: str):
             # The first song in the Que is removed and set as the currently playing song.
             guild_data.CurrentSong = guild_data.que.pop(0)
 
+            if not guild_data.CurrentSong.seeked:
+                with database:
+                    database.register_song(guild_data.CurrentSong, guild_id, player)
+
             song = yd.YoutubeDL(ytDL_params).extract_info(guild_data.CurrentSong.url, download=False)
-            guild_data.CurrentSong.plying_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0]['url']
+            guild_data.CurrentSong.plying_url = [i for i in song['formats'] if i['format_id'] == song['format_id']][0][
+                'url']
             audio_src = discord.FFmpegPCMAudio(guild_data.CurrentSong.plying_url, **guild_data.CurrentSong.options)
             guild_data.voice.play(audio_src, after=play_song)
             guild_data.CurrentSong.start_time = datetime.now()
-
 
     if channel.guild is guild:
         # This connects the client to a particular guild. Also checks if already connected.
@@ -255,7 +374,7 @@ async def q(ctx: Context):
     sep = "------------------------"
     np = " Now Playing "
 
-    outstr = sep+np+sep + "\n" + "0) " + guild_data.CurrentSong.__str__() + f"Time elapsed: = {reduce_secs(round(time_elapsed.total_seconds() + guild_data.CurrentSong.seek_to))}/{reduce_secs(round(guild_data.CurrentSong.duration))}" + '\n' + sep+np+sep + "\n"
+    outstr = sep + np + sep + "\n" + "0) " + guild_data.CurrentSong.__str__() + f"Time elapsed: = {reduce_secs(round(time_elapsed.total_seconds() + guild_data.CurrentSong.seek_to))}/{reduce_secs(round(guild_data.CurrentSong.duration))}" + '\n' + sep + np + sep + "\n"
     outstr = outstr + "\n" + sep + " Playing in Two More Weeks " + sep + "\n"
     for i, song in enumerate(guild_data.que):
         outstr = outstr + f"{i + 1}) " + song.__str__() + '\n'
@@ -323,46 +442,50 @@ async def r(ctx: Context, term: str):
     :return: Message with removed song information
     """
     guild_id = ctx.author.guild.id
-    guild_data:GuildInf = Guild_Q[guild_id]
+    guild_data: GuildInf = Guild_Q[guild_id]
     if len(term) == 0:
         pass
 
     else:
-        if int(term)-1 <= len(guild_data.que):
-            removed_song = guild_data.que.pop(int(term)-1)
+        if int(term) - 1 <= len(guild_data.que):
+            removed_song = guild_data.que.pop(int(term) - 1)
             outstr = f"```Removed {removed_song.__str__()} from the queue```"
             await ctx.send(outstr)
 
 
 @bot.command()
-async def seek(ctx: Context, term:str):
+async def seek(ctx: Context, term: str):
     """
-
+    Seeks to a particular location in the track
     :param ctx:
     :param term: string literal of style MM:SS or HH:MM:SS
-    :return:
+    :return: None
     """
     guild_id = ctx.author.guild.id
     guild_data: GuildInf = Guild_Q[guild_id]
     song = deepcopy(guild_data.CurrentSong)
+    song.seeked = True
     options = None
     L = [int(i) for i in term.split(':')]
     if term.count(':') == 1:
-        song.seek_to = L[0]*60 + L[1]
+        song.seek_to = L[0] * 60 + L[1]
         if song.seek_to > song.duration:
             pass
         guild_data.que.insert(0, song)
-        song.options = {'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {00:02d}:{L[0]:02d}:{L[1]:02d}', 'options': '-vn'}
+        song.options = {
+            'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {00:02d}:{L[0]:02d}:{L[1]:02d}',
+            'options': '-vn'}
         await s(ctx)
 
     elif term.count(':') == 2:
-        song.seek_to = L[0]*60*60 + L[1] * 60 + L[2]
-        song.options = {'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {L[0]:02d}:{L[1]:02d}:{L[2]:02d}', 'options': '-vn'}
+        song.seek_to = L[0] * 60 * 60 + L[1] * 60 + L[2]
+        song.options = {
+            'before_options': f'-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {L[0]:02d}:{L[1]:02d}:{L[2]:02d}',
+            'options': '-vn'}
         if song.seek_to > song.duration:
             pass
         guild_data.que.insert(0, song)
         await s(ctx)
-
 
 
 with open('init.json', 'r') as f:
