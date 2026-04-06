@@ -1,0 +1,5 @@
+# Excluding init file that contains discord token.
+init.json
+
+# And the .vscode directory
+.vscode
