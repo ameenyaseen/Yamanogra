@@ -230,7 +230,7 @@ async def h(ctx: Context):
     :param ctx:
     :return: Message Out
     """
-    outstr = "Yamanogra V0.6.1 Beta - Developed by brotheryam\n Part of the MaMa network! Check out Mamamnogra ()" + "* - Optional argument\n\n" + "\p [search term or url]* - Plays a song\n" + "\q - Displays queue\n" + "\s [integer]* - Skips to song based on queue indexing\n" + "\\url - Displays Youtube link to currently playing song\n" + "\\r [integer] - Removes song at given index from the queue\n" + "\seek [int]:[int] or [int]:[int]:[int] - Seeks to specified point in song"
+    outstr = "Yamanogra V0.6.1 Beta - Developed by brotheryam\n Part of the MaMa network! Check out Mamamnogra ()" + "* - Optional argument\n\n" + "\\p [search term or url]* - Plays a song\n" + "\q - Displays queue\n" + "\s [integer]* - Skips to song based on queue indexing\n" + "\\url - Displays Youtube link to currently playing song\n" + "\\r [integer] - Removes song at given index from the queue\n" + "\seek [int]:[int] or [int]:[int]:[int] - Seeks to specified point in song"
     await ctx.send('```' + outstr + '```')
 
 
