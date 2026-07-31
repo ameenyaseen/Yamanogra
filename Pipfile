@@ -5,11 +5,12 @@ name = "pypi"
 
 [packages]
 yt-dlp = "*"
-discord = "*"
+"discord.py" = "*"
 pynacl = "*"
+davey = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.9"
-python_full_version = "3.9.7"
+python_version = "3.14"
+python_full_version = "3.14.3"
